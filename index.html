@@ -112,8 +112,10 @@ class CardMaker extends React.Component {
     cards:[], selCard:null, selEl:null,
     showBleed:true, showSafe:true, zoom:1,
     stageW:900, stageH:640,
+    assets:[], dragOver:false,
     leftTab:'card', modal:null, batchText:'', toast:null
   };
+  MAXDIM = 1600;
 
   componentDidMount(){
     const t = this.props.theme && this.THEMES[this.props.theme] ? this.props.theme : 'studio';
@@ -589,7 +591,7 @@ class CardMaker extends React.Component {
   }
 
   saveJSON(){
-    const data={ app:'card-maker', version:1, cards:this.state.cards, theme:this.state.theme, accent:this.state.accent };
+    const data={ app:'card-maker', version:1, cards:this.state.cards, theme:this.state.theme, accent:this.state.accent, assets:this.state.assets };
     this.download('card-project.json', new Blob([JSON.stringify(data)],{type:'application/json'}));
     this.toast('Project saved');
   }
@@ -599,22 +601,70 @@ class CardMaker extends React.Component {
       const d=JSON.parse(r.result);
       if(!d.cards) throw 0;
       this.history={past:[],future:[]}; this.imgCache={};
-      this.setState({ cards:d.cards, selCard:d.cards[0]&&d.cards[0].id, selEl:null, theme:d.theme||this.state.theme, accent:d.accent||this.state.accent });
+      this.setState({ cards:d.cards, selCard:d.cards[0]&&d.cards[0].id, selEl:null, theme:d.theme||this.state.theme, accent:d.accent||this.state.accent, assets:Array.isArray(d.assets)?d.assets:[] });
       this.toast('Project loaded');
     }catch(e){ this.toast('Invalid project file'); } };
     r.readAsText(file);
   }
-  onUpload(file){
-    if(!file) return;
+  // Read an image file, downscale oversized art (keeps saved JSON/PDF lean),
+  // and hand back a data-URL plus its width/height aspect ratio.
+  loadImageScaled(file, cb){
     const r=new FileReader();
     r.onload=()=>{
-      const src=r.result;
-      const el=this.curEl();
-      if(el && el.type==='image'){ this.updateSelEl({src},{key:'img'}); }
-      else { this.addEl('image',{src}); }
-      this.toast('Image added');
+      const img=new Image();
+      img.onload=()=>{
+        const w=img.naturalWidth||1, hh=img.naturalHeight||1, ratio=w/hh;
+        const scale=Math.min(1, this.MAXDIM/Math.max(w,hh));
+        if(scale>=1){ cb(r.result, ratio); return; }
+        const cw=Math.round(w*scale), ch=Math.round(hh*scale);
+        const cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
+        cv.getContext('2d').drawImage(img,0,0,cw,ch);
+        const keepAlpha=/png|gif|webp|svg/i.test(file.type);
+        cb(cv.toDataURL(keepAlpha?'image/png':'image/jpeg', keepAlpha?undefined:0.9), ratio);
+      };
+      img.onerror=()=>this.toast('Could not read that image');
+      img.src=r.result;
     };
     r.readAsDataURL(file);
+  }
+  // Import one file: replace the selected image, or drop a new one onto the card.
+  importFile(file, opts){
+    opts=opts||{};
+    if(!file || !/^image\//.test(file.type)){ this.toast('Not an image file'); return; }
+    this.loadImageScaled(file, (src,ratio)=>{
+      this.addAsset(src, ratio);
+      if(opts.replace){ this.updateSelEl({src},{key:'img'}); this.toast('Image replaced'); }
+      else { this.placeImage(src, ratio, opts); this.toast('Image added'); }
+    });
+  }
+  onUpload(file){ this.importFile(file, { replace: !!(this.curEl()&&this.curEl().type==='image') }); }
+  // Add an image element sized to its aspect ratio, centred (or at a drop point).
+  placeImage(src, ratio, opts){
+    opts=opts||{};
+    const c=this.curCard(); if(!c) return;
+    ratio=ratio||1;
+    let w=c.w*0.6, h=w/ratio; const maxH=c.h*0.6;
+    if(h>maxH){ h=maxH; w=h*ratio; }
+    w=+w.toFixed(1); h=+h.toFixed(1);
+    let x=(opts.x!=null?opts.x:c.w/2)-w/2, y=(opts.y!=null?opts.y:c.h/2)-h/2;
+    x=+Math.max(0,Math.min(c.w-w,x)).toFixed(1);
+    y=+Math.max(0,Math.min(c.h-h,y)).toFixed(1);
+    this.addEl('image',{src,w,h,x,y,fit:'cover'});
+  }
+  addAsset(src, ratio){
+    if(!src || this.state.assets.some(a=>a.src===src)) return;
+    this.setState({ assets:[{src,ratio:ratio||1}, ...this.state.assets].slice(0,40) });
+  }
+  removeAsset(i){ const assets=[...this.state.assets]; assets.splice(i,1); this.setState({assets}); }
+  canvasDrop(e){
+    e.preventDefault(); this.setState({dragOver:false});
+    const files=(e.dataTransfer&&e.dataTransfer.files)?[...e.dataTransfer.files]:[];
+    const imgs=files.filter(f=>/^image\//.test(f.type));
+    if(!imgs.length) return;
+    const r=this.faceEl&&this.faceEl.getBoundingClientRect();
+    let pos={};
+    if(r){ const s=this.scale, B=this.B; pos={ x:(e.clientX-r.left)/s-B, y:(e.clientY-r.top)/s-B }; }
+    imgs.forEach((f,i)=>this.importFile(f, i===0?pos:{}));
   }
 
   batchGenerate(){
@@ -797,10 +847,25 @@ class CardMaker extends React.Component {
       h('div',{style:{background:t.panel2,border:'1px solid '+t.border,borderRadius:10,padding:'12px 12px 4px'}},rows));
   }
 
+  renderAssets(){
+    const t=this.th(), h=this.h, A=this.ac();
+    if(!this.state.assets.length) return null;
+    return this.section('Assets','image',
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6}},
+        this.state.assets.map((a,i)=>h('button',{key:i,title:'Click to add to card',
+          onClick:()=>this.placeImage(a.src,a.ratio,{}),
+          style:{position:'relative',aspectRatio:'1',padding:0,borderRadius:8,border:'1px solid '+t.border,cursor:'pointer',overflow:'hidden',
+            background:t.input,backgroundImage:'url('+a.src+')',backgroundSize:'cover',backgroundPosition:'center'},
+          onMouseEnter:e=>{e.currentTarget.style.borderColor=A;},
+          onMouseLeave:e=>{e.currentTarget.style.borderColor=t.border;}},
+          h('span',{title:'Remove from assets',onClick:e=>{e.stopPropagation();this.removeAsset(i);},
+            style:{position:'absolute',top:2,right:2,width:16,height:16,borderRadius:8,background:'rgba(0,0,0,.55)',color:'#fff',fontSize:12,fontWeight:700,lineHeight:'15px',textAlign:'center'}},'×')))),
+      h('span',{style:{fontSize:10.5,color:t.faint,fontWeight:600}}, this.state.assets.length+' saved'));
+  }
   renderLeftPanel(){
     const t=this.th(), h=this.h, c=this.curCard(); if(!c) return null;
     const A=this.ac();
-    const addBtn=(type,icon,label)=>h('button',{key:type,onClick:()=>this.addEl(type),
+    const addBtn=(type,icon,label,onClick)=>h('button',{key:type,onClick:onClick||(()=>this.addEl(type)),
       style:{display:'flex',flexDirection:'column',alignItems:'center',gap:6,padding:'12px 4px',borderRadius:10,border:'1px solid '+t.border,background:t.panel2,color:t.text,cursor:'pointer',transition:'all .12s'},
       onMouseEnter:e=>{e.currentTarget.style.borderColor=A;e.currentTarget.style.color=A;},
       onMouseLeave:e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.text;}},
@@ -824,10 +889,13 @@ class CardMaker extends React.Component {
         tm.label)));
 
     return h('div',{style:{width:288,flex:'none',background:t.panel,borderRight:'1px solid '+t.border,overflowY:'auto',display:'flex',flexDirection:'column'}},
+      h('input',{ref:n=>this.imgInput=n,type:'file',accept:'image/*',multiple:true,style:{display:'none'},
+        onChange:e=>{ [...e.target.files].forEach(f=>this.importFile(f)); e.target.value=''; }}),
       this.renderInspector(),
       this.section('Add Element','plus',
         h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8}},
-          addBtn('text','type','Text'),addBtn('image','image','Image'),addBtn('icon','star','Icon'),addBtn('shape','square','Shape'))),
+          addBtn('text','type','Text'),addBtn('image','image','Image',()=>this.imgInput&&this.imgInput.click()),addBtn('icon','star','Icon'),addBtn('shape','square','Shape'))),
+      this.renderAssets(),
       this.section('Templates','grid',tmplGrid),
       this.section('Card Type','cards',h('div',{style:{display:'flex',flexDirection:'column',gap:6}},
         typeBtns,
@@ -1000,8 +1068,14 @@ class CardMaker extends React.Component {
         toggle('showSafe','Safe','rgba(60,130,250,.8)'),
         h('div',{style:{width:1,height:18,background:t.border}}),
         h('div',{style:{fontSize:11.5,color:t.sub,fontWeight:600,padding:'0 2px'}}, c?(c.w+' × '+c.h+' mm'):'')),
-      h('div',{ref:n=>this.stageEl=n,style:{flex:1,overflow:'auto',display:'flex',alignItems:'center',justifyContent:'center',padding:40}},
+      h('div',{ref:n=>this.stageEl=n,
+        onDragOver:e=>{ if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files')){ e.preventDefault(); if(!this.state.dragOver) this.setState({dragOver:true}); } },
+        onDragLeave:e=>{ if(e.target===e.currentTarget) this.setState({dragOver:false}); },
+        onDrop:e=>this.canvasDrop(e),
+        style:{flex:1,overflow:'auto',display:'flex',alignItems:'center',justifyContent:'center',padding:40}},
         c? h('div',{style:{boxShadow:'0 12px 40px rgba(0,0,0,.22)',borderRadius:3}}, this.renderFace(c,s,true)) : null),
+      this.state.dragOver?h('div',{style:{position:'absolute',inset:0,zIndex:5,pointerEvents:'none',display:'flex',alignItems:'center',justifyContent:'center',border:'2.5px dashed '+this.ac(),borderRadius:4,background:this.ac()+'10'}},
+        h('div',{style:{background:t.panel,color:t.text,padding:'10px 18px',borderRadius:10,fontWeight:700,fontSize:13,boxShadow:t.shadow}},'Drop image to add')):null,
       h('div',{style:{position:'absolute',bottom:16,left:'50%',transform:'translateX(-50%)',zIndex:4,display:'flex',alignItems:'center',gap:2,background:t.panel,border:'1px solid '+t.border,borderRadius:10,padding:'4px 6px',boxShadow:t.shadow}},
         zb('−',()=>this.setState({zoom:Math.max(.3,+(this.state.zoom-.15).toFixed(2))}),'Zoom out'),
         h('button',{onClick:()=>this.setState({zoom:1}),style:{minWidth:52,textAlign:'center',border:'none',background:'transparent',color:t.text,cursor:'pointer',fontSize:12,fontWeight:700}},Math.round(this.state.zoom*100)+'%'),
