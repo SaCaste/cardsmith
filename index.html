@@ -223,7 +223,9 @@ class CardMaker extends React.Component {
     this.pushHistory('add');
     const el=this.makeEl(type,c,extra);
     const cards=this.state.cards.map(x=>x.id!==c.id?x:{...x, elements:[...x.elements, el]});
-    this.setState({ cards, selEl:el.id, leftTab:'card' });
+    const editing = type==='text';
+    if(editing){ this._focusEdit=true; this._selectNew=true; this._hk=null; }
+    this.setState({ cards, selEl:el.id, leftTab:'card', editEl: editing? el.id : null });
   }
   deleteEl(){
     const c=this.curCard(); if(!c||!this.state.selEl) return;
@@ -1094,7 +1096,7 @@ class CardMaker extends React.Component {
           onChange:e=>this.updateSelEl({text:e.target.value},{key:'text'}),
           onKeyDown:e=>{ if(e.key==='Escape'){ e.stopPropagation(); e.preventDefault(); this.setState({editEl:null}); } },
           onBlur:()=>this.setState({editEl:null}),
-          ref:(n)=>{ if(n && this._focusEdit){ this._focusEdit=false; n.focus(); const L=n.value.length; n.setSelectionRange(L,L); } },
+          ref:(n)=>{ if(n && this._focusEdit){ this._focusEdit=false; n.focus(); if(this._selectNew){ this._selectNew=false; n.select(); } else { const L=n.value.length; n.setSelectionRange(L,L); } } },
           style:{width:'100%',height:'100%',fontFamily:el.font,fontSize:el.size*s,fontWeight:el.weight,fontStyle:el.italic?'italic':'normal',
             color:el.color,textAlign:el.align,lineHeight:el.lineH||1.2,letterSpacing:(el.letter||0)*s/3,whiteSpace:'pre-wrap',wordBreak:'break-word',
             overflow:'hidden',background:'transparent',border:0,outline:0,padding:0,margin:0,resize:'none',display:'block',boxSizing:'border-box',pointerEvents:'auto'}});
