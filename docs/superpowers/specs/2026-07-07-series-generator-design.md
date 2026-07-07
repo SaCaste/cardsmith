@@ -88,7 +88,7 @@ Derived, since elements have no user names:
 
 **`seriesGenerate()`:**
 
-- Guardrail: if `N === 0` toast and abort; if `N > 300` toast
+- Guardrail: if `N === 0` toast and abort; if `N > 150` toast
   ("Too many cards (N) — narrow the ranges") and abort.
 - One `pushHistory('series')` so a single undo reverts the whole run.
 - For each card index `i` in `[0, N)`:
@@ -97,7 +97,9 @@ Derived, since elements have no user names:
     - `product`: standard mixed-radix decomposition of `i` across the vars'
       value-array lengths.
   - `nc = clone(base)`, `nc.id = uid()`, every element gets a fresh `uid()`,
-    `nc.name = base.name + ' ' + (i+1)`, `nc.qty = 1`.
+    `nc.qty = 1`. **Name:** use the value at `i` of the first variable whose
+    `prop==='text'` (converted to a string); if there is no text variable, fall
+    back to `base.name + ' ' + (i+1)`.
   - Apply each variable: if `elId==='bg'`, set
     `nc.bg = {...nc.bg, type:'solid', color:value}`; else find the element by
     `elId` in `nc.elements` and set `el[prop] = value` (skip if the element is
@@ -149,9 +151,10 @@ Layout:
 **In:** targets text/icon/color/fill + background; range and list; zip and
 product; live count; N guardrail; single-undo generation.
 
-**Out:** shape **stroke** (fill only); per-field name templates (name is
-`base + index`); CSV import here (Batch already covers it); per-card visual
-preview (value chips only); drag-reordering of values; image `src` variation.
+**Out:** shape **stroke** (fill only); per-field name templates (name comes from
+the first text variable, else `base + index`); CSV import here (Batch already
+covers it); per-card visual preview (value chips only); drag-reordering of
+values; image `src` variation.
 
 ## Verification
 
@@ -163,8 +166,9 @@ Single-file app, no test harness. Verify in the browser:
    colors; keep **Zip** → count stays 10; Generate → 10 cards appended,
    numbers 1–10, icons and colors cycling every 3.
 4. Switch to **Product** with numbers 1→4 and 4 icons → count shows 16; Generate
-   → 16 cards covering all combinations.
-5. Push a range that would exceed 300 (e.g. product 40×40) → blocked with a
+   → 16 cards covering all combinations; each card is named after its number
+   (the text variable's value).
+5. Push a range that would exceed 150 (e.g. product 13×13 = 169) → blocked with a
    toast, nothing generated.
 6. Undo once → the whole generated run disappears in one step.
 7. Batch generate (`{{field}}` + CSV) still works unchanged; export/PNG/PDF and
