@@ -747,7 +747,7 @@ class CardMaker extends React.Component {
   }
   resolveVar(v){
     if(v.prop==='text' && v.valueMode==='range'){
-      const step=Math.abs(v.step||1); if(!(step>0)) return [];
+      const step=Math.abs(+v.step); if(!(step>0)) return [];
       const out=[]; const from=+v.from, to=+v.to;
       if(to>=from){ for(let n=from;n<=to+1e-9;n+=step){ out.push(String(+n.toFixed(4))); if(out.length>=500) break; } }
       else { for(let n=from;n>=to-1e-9;n-=step){ out.push(String(+n.toFixed(4))); if(out.length>=500) break; } }
@@ -777,7 +777,7 @@ class CardMaker extends React.Component {
       arrs.forEach(o=>{ let vi; if(mode==='product'){ vi=acc % o.vals.length; acc=Math.floor(acc/o.vals.length); } else { vi=i % o.vals.length; } valById[o.v.id]=o.vals[vi]; });
       const nc=this.clone(c); nc.id=this.uid(); nc.qty=1;
       nc.name = textArr ? String(valById[textArr.v.id]) : (c.name+' '+(i+1));
-      nc.elements = c.elements.map(e=>{ const ne={...this.clone(e), id:this.uid()}; vars.forEach(v=>{ if(v.elId===e.id && valById[v.id]!==undefined) ne[v.prop]=valById[v.id]; }); return ne; });
+      nc.elements = nc.elements.map(e=>{ const ne={...e, id:this.uid()}; vars.forEach(v=>{ if(v.elId===e.id && valById[v.id]!==undefined) ne[v.prop]=valById[v.id]; }); return ne; });
       vars.forEach(v=>{ if(v.elId==='bg' && valById[v.id]!==undefined) nc.bg={...nc.bg, type:'solid', color:valById[v.id]}; });
       newCards.push(nc);
     }
