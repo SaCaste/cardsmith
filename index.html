@@ -1251,9 +1251,9 @@ class CardMaker extends React.Component {
             style:{padding:'4px 10px',borderRadius:6,border:'1px solid '+(v.valueMode===mm?A:t.border),background:v.valueMode===mm?A+'18':t.panel,color:v.valueMode===mm?A:t.sub,cursor:'pointer',fontSize:11.5,fontWeight:700}},mm==='range'?'Range':'List')));
         const body = v.valueMode==='range'
           ? h('div',{style:{display:'flex',gap:8,alignItems:'center'}},
-              h('div',{style:{flex:1}},this.field('From',this.numInput(v.from,x=>this.updateSeriesVar(v.id,{from:x}),{step:1}))),
-              h('div',{style:{flex:1}},this.field('To',this.numInput(v.to,x=>this.updateSeriesVar(v.id,{to:x}),{step:1}))),
-              h('div',{style:{flex:1}},this.field('Step',this.numInput(v.step,x=>this.updateSeriesVar(v.id,{step:x}),{step:1,min:0}))))
+              h('div',{style:{flex:1}},this.field('From',this.numInput(v.from,x=>{ if(!isNaN(x)) this.updateSeriesVar(v.id,{from:x}); },{step:1}))),
+              h('div',{style:{flex:1}},this.field('To',this.numInput(v.to,x=>{ if(!isNaN(x)) this.updateSeriesVar(v.id,{to:x}); },{step:1}))),
+              h('div',{style:{flex:1}},this.field('Step',this.numInput(v.step,x=>{ if(!isNaN(x)) this.updateSeriesVar(v.id,{step:x}); },{step:1,min:0}))))
           : this.textInput(v.list.join(', '),x=>this.updateSeriesVar(v.id,{list:x.split(',').map(s=>s.trim()).filter(Boolean)}),{ph:'e.g. A, K, Q, J'});
         editor=h('div',{},seg,body);
       } else if(v.prop==='icon'){
@@ -1270,7 +1270,7 @@ class CardMaker extends React.Component {
             h('button',{onClick:()=>this.updateSeriesVar(v.id,{list:v.list.filter((_,x)=>x!==ci)}),style:{border:'none',background:'transparent',color:t.faint,cursor:'pointer',padding:0,fontSize:14,lineHeight:1}},'×'))),
           h('label',{style:{display:'inline-flex',alignItems:'center',gap:4,cursor:'pointer',fontSize:11.5,color:A,fontWeight:700,border:'1px dashed '+A,borderRadius:7,padding:'4px 8px',position:'relative'}},
             '+ color',
-            h('input',{type:'color',onChange:e=>this.updateSeriesVar(v.id,{list:[...v.list,e.target.value]}),style:{width:0,height:0,opacity:0,position:'absolute',pointerEvents:'none'}})));
+            h('input',{type:'color',onBlur:e=>this.updateSeriesVar(v.id,{list:[...v.list,e.target.value]}),style:{width:0,height:0,opacity:0,position:'absolute',pointerEvents:'none'}})));
       }
       const vals=this.resolveVar(v);
       return h('div',{key:v.id,style:{border:'1px solid '+t.border,borderRadius:12,padding:'12px',marginBottom:10,background:t.panel2}},
