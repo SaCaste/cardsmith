@@ -153,6 +153,7 @@ class CardMaker extends React.Component {
     if(mod && e.key.toLowerCase()==='z'){ e.preventDefault(); if(e.shiftKey) this.redo(); else this.undo(); }
     else if(mod && e.key.toLowerCase()==='y'){ e.preventDefault(); this.redo(); }
     else if(mod && e.key.toLowerCase()==='d'){ e.preventDefault(); this.dupEl(); }
+    else if((e.key==='Enter'||e.key==='F2') && this.state.selEl && !this.state.editEl){ const el=this.curEl(); if(el && el.type==='text'){ e.preventDefault(); this.enterEdit(el); } }
     else if((e.key==='Delete'||e.key==='Backspace') && this.state.selEl){ e.preventDefault(); this.deleteEl(); }
   }
 
