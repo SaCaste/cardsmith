@@ -114,7 +114,7 @@ class CardMaker extends React.Component {
     stageW:900, stageH:640,
     assets:[], dragOver:false,
     leftTab:'card', modal:null, batchText:'', toast:null,
-    series:{ mode:'zip', vars:[] }
+    series:{ mode:'product', vars:[] }
   };
   MAXDIM = 1600;
 
@@ -711,7 +711,7 @@ class CardMaker extends React.Component {
   }
   openSeries(){
     const c=this.curCard(); if(!c){ this.toast('Select a base card'); return; }
-    this.setState({ modal:'series', series:{ mode:'zip', vars:[] } });
+    this.setState({ modal:'series', series:{ mode:'product', vars:[] } });
   }
   seriesTargets(){
     const c=this.curCard(); if(!c) return [];
@@ -1287,9 +1287,13 @@ class CardMaker extends React.Component {
           h('div',{style:{flex:1}},
             h('div',{style:{fontWeight:800,fontSize:16,color:t.text}},'Generate series'),
             h('div',{style:{fontSize:12,color:t.sub,marginTop:1}},'Vary properties of "'+(c?c.name:'this card')+'" across a range or list')),
-          h('div',{style:{display:'flex',gap:6,marginRight:8}},modeBtn('zip','Zip'),modeBtn('product','Product')),
+          h('div',{style:{display:'flex',gap:6,marginRight:8}},modeBtn('product','All combos'),modeBtn('zip','Parallel')),
           h('button',{onClick:()=>this.setState({modal:null}),style:{border:'none',background:'transparent',color:t.sub,cursor:'pointer',padding:4}},this.uIcon('close',20,'currentColor'))),
         h('div',{style:{padding:'16px 22px',overflowY:'auto',flex:1}},
+          h('div',{style:{fontSize:12,color:t.sub,background:t.input,borderRadius:9,padding:'9px 12px',marginBottom:14,lineHeight:1.45}},
+            S.mode==='product'
+              ? h('span',{},h('b',{style:{color:t.text}},'All combinations'),' — every value of each variable is crossed with every other (A × B). 4 icons × 13 numbers = 52 cards.')
+              : h('span',{},h('b',{style:{color:t.text}},'Parallel'),' — variables advance together, position by position (A₁+B₁, A₂+B₂ …). 4 icons + 13 numbers = 13 cards.')),
           h('div',{style:{display:'flex',alignItems:'center',gap:10,marginBottom:12}},
             h('div',{style:{fontSize:11,fontWeight:700,letterSpacing:'.9px',textTransform:'uppercase',color:t.sub,flex:1}},'Variables'),
             addSelect),
