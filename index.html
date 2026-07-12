@@ -605,45 +605,78 @@ class CardMaker extends React.Component {
     }
     this.toast(all?'Exported '+cards.length+' PNGs':'PNG exported');
   }
+  // Back rendered at a given card's size: cover-fit over the full bleed
+  // extents so mixed-size decks never show uncovered slivers (spec §3).
+  drawBackFor(card, ppm){
+    const B=this.B;
+    const back=this.state.back || this.defaultBack(card);
+    const s=Math.max((card.w+2*B)/(back.w+2*B), (card.h+2*B)/(back.h+2*B));
+    const src=this.drawCard(back, ppm*s);
+    const pw=Math.round((card.w+2*B)*ppm), ph=Math.round((card.h+2*B)*ppm);
+    const cv=document.createElement('canvas'); cv.width=pw; cv.height=ph;
+    cv.getContext('2d').drawImage(src, Math.round((pw-src.width)/2), Math.round((ph-src.height)/2));
+    return cv;
+  }
+  cutMarks(pdf, x, y, card){
+    const B=this.B, m=3.2;
+    pdf.setDrawColor(40); pdf.setLineWidth(0.15);
+    const tx=x+B, ty=y+B, tr=x+B+card.w, tb=y+B+card.h;
+    pdf.line(tx-m,ty, tx-0.5,ty); pdf.line(tx,ty-m, tx,ty-0.5);
+    pdf.line(tr+0.5,ty, tr+m,ty); pdf.line(tr,ty-m, tr,ty-0.5);
+    pdf.line(tx-m,tb, tx-0.5,tb); pdf.line(tx,tb+0.5, tx,tb+m);
+    pdf.line(tr+0.5,tb, tr+m,tb); pdf.line(tr,tb+0.5, tr,tb+m);
+  }
   async exportPDF(pageId){
     if(!window.jspdf){ this.toast('PDF engine still loading…'); return; }
     const { jsPDF }=window.jspdf;
     const ppm=300/25.4, B=this.B;
     const pages={ letter:{w:215.9,h:279.4,fmt:'letter'}, a4:{w:210,h:297,fmt:'a4'} };
     const pg=pages[pageId]||pages.letter;
-    const margin=8, mark=3.2, gap=0;
+    const margin=8, gap=0;
+    const duplex=this.state.duplexBacks;
     this.toast('Building PDF…');
-    await this.ensureImages(this.state.cards);
+    const imgCards=[...this.state.cards];
+    if(duplex && this.state.back) imgCards.push(this.state.back);
+    await this.ensureImages(imgCards);
     const list=[];
     this.state.cards.forEach(c=>{ for(let q=0;q<(c.qty||1);q++) list.push(c); });
     if(!list.length){ this.toast('No cards'); return; }
     const pdf=new jsPDF({ unit:'mm', format:pg.fmt, orientation:'portrait' });
-    let placed=0, first=true;
-    let idx=0;
+    const backData={}; // rendered back PNG per distinct card size
+    const backFor=(card)=>{
+      const k=card.w+'x'+card.h;
+      if(!backData[k]) backData[k]=this.drawBackFor(card,ppm).toDataURL('image/png');
+      return backData[k];
+    };
+    let placed=0, first=true, idx=0;
     while(idx<list.length){
       if(!first) pdf.addPage(pg.fmt,'portrait');
       first=false;
       let x=margin, y=margin, rowH=0;
+      const slots=[];
       while(idx<list.length){
         const card=list[idx];
         const cw=card.w+2*B, ch=card.h+2*B;
         if(x+cw > pg.w-margin){ x=margin; y+=rowH+gap; rowH=0; }
         if(y+ch > pg.h-margin){ break; }
         const cv=this.drawCard(card,ppm);
-        const data=cv.toDataURL('image/png');
-        pdf.addImage(data,'PNG', x, y, cw, ch, undefined, 'FAST');
-        pdf.setDrawColor(40); pdf.setLineWidth(0.15);
-        const tx=x+B, ty=y+B, tr=x+B+card.w, tb=y+B+card.h;
-        const m=mark;
-        pdf.line(tx-m,ty, tx-0.5,ty); pdf.line(tx,ty-m, tx,ty-0.5);
-        pdf.line(tr+0.5,ty, tr+m,ty); pdf.line(tr,ty-m, tr,ty-0.5);
-        pdf.line(tx-m,tb, tx-0.5,tb); pdf.line(tx,tb+0.5, tx,tb+m);
-        pdf.line(tr+0.5,tb, tr+m,tb); pdf.line(tr,tb+0.5, tr,tb+m);
+        pdf.addImage(cv.toDataURL('image/png'),'PNG', x, y, cw, ch, undefined, 'FAST');
+        this.cutMarks(pdf, x, y, card);
+        slots.push({ x, y, card });
         x+=cw+gap; rowH=Math.max(rowH,ch); idx++; placed++;
+      }
+      if(duplex && slots.length){
+        pdf.addPage(pg.fmt,'portrait');
+        slots.forEach(sl=>{
+          const cw=sl.card.w+2*B, ch=sl.card.h+2*B;
+          const bx=pg.w - sl.x - cw; // x-mirror for long-edge flip
+          pdf.addImage(backFor(sl.card),'PNG', bx, sl.y, cw, ch, undefined, 'FAST');
+          this.cutMarks(pdf, bx, sl.y, sl.card);
+        });
       }
     }
     pdf.save('card-deck-'+pageId+'.pdf');
-    this.toast('PDF: '+placed+' cards exported');
+    this.toast('PDF: '+placed+' cards exported'+(duplex?' (double-sided)':''));
   }
 
   saveJSON(){
@@ -1107,6 +1140,9 @@ class CardMaker extends React.Component {
           h('button',{onClick:()=>this.dupCard(),style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px',borderRadius:9,border:'1.5px dashed '+t.border,background:'transparent',color:t.sub,cursor:'pointer',fontSize:12.5,fontWeight:600}},this.uIcon('copy',15,'currentColor'),'Duplicate'))),
       h('div',{style:{borderTop:'1px solid '+t.border,padding:'13px 14px',display:'flex',flexDirection:'column',gap:8,background:t.panel2}},
         h('div',{style:{fontSize:11,fontWeight:700,letterSpacing:'.9px',textTransform:'uppercase',color:t.sub,marginBottom:2}},'Export & Project'),
+        h('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:12,fontWeight:600,color:t.text,cursor:'pointer',padding:'0 2px'}},
+          h('input',{type:'checkbox',checked:this.state.duplexBacks,onChange:e=>this.setState({duplexBacks:e.target.checked}),style:{accentColor:A}}),
+          'Double-sided (card backs)'),
         h('div',{style:{display:'flex',gap:8}},
           eBtn('download','PDF · Letter',()=>this.exportPDF('letter'),true),
           eBtn('download','PDF · A4',()=>this.exportPDF('a4'))),
