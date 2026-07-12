@@ -128,6 +128,7 @@ class CardMaker extends React.Component {
   state = {
     theme:'studio', accent:'#10b981',
     cards:[], selCard:null, selEl:null, editEl:null,
+    side:'front', back:null, duplexBacks:false,
     showBleed:true, showSafe:true, zoom:1,
     stageW:900, stageH:640,
     assets:[], dragOver:false,
@@ -181,44 +182,68 @@ class CardMaker extends React.Component {
   uid(){ this._n=(this._n||0)+1; return 'e'+this._n+'_'+Date.now().toString(36).slice(-4); }
   clone(x){ return JSON.parse(JSON.stringify(x)); }
   toast(m){ this.setState({toast:m}); clearTimeout(this._tt); this._tt=setTimeout(()=>this.setState({toast:null}),1900); }
-  curCard(){ return this.state.cards.find(c=>c.id===this.state.selCard) || null; }
+  isBack(){ return this.state.side==='back'; }
+  frontCard(){ return this.state.cards.find(c=>c.id===this.state.selCard) || null; }
+  curCard(){ return this.isBack() ? this.state.back : this.frontCard(); }
   curEl(){ const c=this.curCard(); if(!c) return null; return c.elements.find(e=>e.id===this.state.selEl) || null; }
+  // Write the updated card object back to whichever side is on canvas.
+  setCur(next, extra){
+    if(this.isBack()) this.setState({ back:next, ...(extra||{}) });
+    else this.setState({ cards:this.state.cards.map(c=>c.id===next.id?next:c), ...(extra||{}) });
+  }
+  // Default back: accent-colored solid with a centered white star (spec §1).
+  defaultBack(ref){
+    const w=ref?ref.w:this.TYPES.poker.w, h=ref?ref.h:this.TYPES.poker.h;
+    return { name:'Card back', typeId:ref?ref.typeId:'poker', w, h,
+      bg:{type:'solid', color:this.ac(), from:'#ffffff', to:'#dfe6ee', angle:135},
+      border:{width:0, color:'#1c2230', radius:3},
+      elements:[{ id:this.uid(), type:'icon', x:+(w/2-9).toFixed(1), y:+(h/2-9).toFixed(1), w:18, h:18, icon:'star', color:'#ffffff', rotation:0, opacity:1 }] };
+  }
+  flipSide(){
+    const side = this.isBack() ? 'front' : 'back';
+    this._hk=null; // break undo coalescing across sides
+    const patch = { side, selEl:null, editEl:null };
+    if(side==='back' && !this.state.back) patch.back=this.defaultBack(this.frontCard());
+    this.setState(patch);
+  }
 
   pushHistory(key){
     const now=Date.now();
     if(key && key===this._hk && now-(this._ht||0)<700){ this._ht=now; return; }
     this._hk=key; this._ht=now;
-    this.history.past.push(this.clone(this.state.cards));
+    this.history.past.push(this.clone({ cards:this.state.cards, back:this.state.back }));
     if(this.history.past.length>60) this.history.past.shift();
     this.history.future=[];
   }
   undo(){
     if(!this.history.past.length) return;
-    this.history.future.push(this.clone(this.state.cards));
-    const cards=this.history.past.pop();
-    this.setState({ cards }, ()=>this.fixSel());
+    this.history.future.push(this.clone({ cards:this.state.cards, back:this.state.back }));
+    const snap=this.history.past.pop();
+    this.setState({ cards:snap.cards, back:snap.back }, ()=>this.fixSel());
   }
   redo(){
     if(!this.history.future.length) return;
-    this.history.past.push(this.clone(this.state.cards));
-    const cards=this.history.future.pop();
-    this.setState({ cards }, ()=>this.fixSel());
+    this.history.past.push(this.clone({ cards:this.state.cards, back:this.state.back }));
+    const snap=this.history.future.pop();
+    this.setState({ cards:snap.cards, back:snap.back }, ()=>this.fixSel());
   }
   fixSel(){
     let { selCard, selEl, cards } = this.state;
     let c=cards.find(x=>x.id===selCard); if(!c){ c=cards[0]; selCard=c?c.id:null; }
-    if(c && !c.elements.find(e=>e.id===selEl)) selEl=null;
-    this.setState({ selCard, selEl });
+    // Undoing past the first flip can restore back:null — fall to front view.
+    const side = (this.state.side==='back' && !this.state.back) ? 'front' : this.state.side;
+    const cur = side==='back' ? this.state.back : c;
+    if(!cur || !cur.elements.find(e=>e.id===selEl)) selEl=null;
+    this.setState({ selCard, selEl, side });
   }
 
   setCards(cards){ this.setState({ cards }); }
-  patchCard(patch, hist){ if(hist) this.pushHistory(hist); const cards=this.state.cards.map(c=>c.id===this.state.selCard?{...c,...patch}:c); this.setState({cards}); }
+  patchCard(patch, hist){ const c=this.curCard(); if(!c) return; if(hist) this.pushHistory(hist); this.setCur({...c, ...patch}); }
   updateSelEl(patch, opts){
     opts=opts||{};
+    const c=this.curCard(); if(!c) return;
     if(opts.hist!==false) this.pushHistory(opts.key||'edit');
-    const { selCard, selEl }=this.state;
-    const cards=this.state.cards.map(c=> c.id!==selCard ? c : { ...c, elements:c.elements.map(e=> e.id!==selEl ? e : {...e,...patch}) });
-    this.setState({ cards });
+    this.setCur({ ...c, elements:c.elements.map(e=> e.id!==this.state.selEl ? e : {...e,...patch}) });
   }
   enterEdit(el){
     if(!el || el.type!=='text') return;
@@ -241,16 +266,14 @@ class CardMaker extends React.Component {
     const c=this.curCard(); if(!c) return;
     this.pushHistory('add');
     const el=this.makeEl(type,c,extra);
-    const cards=this.state.cards.map(x=>x.id!==c.id?x:{...x, elements:[...x.elements, el]});
     const editing = type==='text';
     if(editing){ this._focusEdit=true; this._selectNew=true; this._hk=null; }
-    this.setState({ cards, selEl:el.id, leftTab:'card', editEl: editing? el.id : null });
+    this.setCur({...c, elements:[...c.elements, el]}, { selEl:el.id, leftTab:'card', editEl: editing? el.id : null });
   }
   deleteEl(){
     const c=this.curCard(); if(!c||!this.state.selEl) return;
     this.pushHistory('del');
-    const cards=this.state.cards.map(x=>x.id!==c.id?x:{...x, elements:x.elements.filter(e=>e.id!==this.state.selEl)});
-    this.setState({ cards, selEl:null });
+    this.setCur({...c, elements:c.elements.filter(e=>e.id!==this.state.selEl)}, { selEl:null });
   }
   dupEl(){
     const c=this.curCard(); const el=this.curEl(); if(!c||!el) return;
@@ -258,8 +281,7 @@ class CardMaker extends React.Component {
     const ne={...this.clone(el), id:this.uid(), x:el.x+4, y:el.y+4};
     const idx=c.elements.findIndex(e=>e.id===el.id);
     const els=[...c.elements]; els.splice(idx+1,0,ne);
-    const cards=this.state.cards.map(x=>x.id!==c.id?x:{...x, elements:els});
-    this.setState({ cards, selEl:ne.id });
+    this.setCur({...c, elements:els}, { selEl:ne.id });
   }
   layer(dir){
     const c=this.curCard(); const el=this.curEl(); if(!c||!el) return;
@@ -268,8 +290,7 @@ class CardMaker extends React.Component {
     els.splice(i,1);
     let j = dir==='front'?els.length : dir==='back'?0 : dir==='up'?Math.min(els.length,i+1) : Math.max(0,i-1);
     els.splice(j,0,el);
-    const cards=this.state.cards.map(x=>x.id!==c.id?x:{...x, elements:els});
-    this.setState({ cards });
+    this.setCur({...c, elements:els});
   }
 
   setType(id){
@@ -393,8 +414,7 @@ class CardMaker extends React.Component {
     const c=this.curCard(); if(!c) return;
     this.pushHistory('tmpl');
     const els = tid==='blank' ? [] : this.templates()[tid](c.w,c.h);
-    const cards=this.state.cards.map(x=>x.id!==c.id?x:{...x, elements:els});
-    this.setState({ cards, selEl:null });
+    this.setCur({...c, elements:els}, { selEl:null });
   }
 
   buildSample(){
@@ -585,49 +605,82 @@ class CardMaker extends React.Component {
     }
     this.toast(all?'Exported '+cards.length+' PNGs':'PNG exported');
   }
+  // Back rendered at a given card's size: cover-fit over the full bleed
+  // extents so mixed-size decks never show uncovered slivers (spec §3).
+  drawBackFor(card, ppm){
+    const B=this.B;
+    const back=this.state.back || this.defaultBack(card);
+    const s=Math.max((card.w+2*B)/(back.w+2*B), (card.h+2*B)/(back.h+2*B));
+    const src=this.drawCard(back, ppm*s);
+    const pw=Math.round((card.w+2*B)*ppm), ph=Math.round((card.h+2*B)*ppm);
+    const cv=document.createElement('canvas'); cv.width=pw; cv.height=ph;
+    cv.getContext('2d').drawImage(src, Math.round((pw-src.width)/2), Math.round((ph-src.height)/2));
+    return cv;
+  }
+  cutMarks(pdf, x, y, card){
+    const B=this.B, m=3.2;
+    pdf.setDrawColor(40); pdf.setLineWidth(0.15);
+    const tx=x+B, ty=y+B, tr=x+B+card.w, tb=y+B+card.h;
+    pdf.line(tx-m,ty, tx-0.5,ty); pdf.line(tx,ty-m, tx,ty-0.5);
+    pdf.line(tr+0.5,ty, tr+m,ty); pdf.line(tr,ty-m, tr,ty-0.5);
+    pdf.line(tx-m,tb, tx-0.5,tb); pdf.line(tx,tb+0.5, tx,tb+m);
+    pdf.line(tr+0.5,tb, tr+m,tb); pdf.line(tr,tb+0.5, tr,tb+m);
+  }
   async exportPDF(pageId){
     if(!window.jspdf){ this.toast('PDF engine still loading…'); return; }
     const { jsPDF }=window.jspdf;
     const ppm=300/25.4, B=this.B;
     const pages={ letter:{w:215.9,h:279.4,fmt:'letter'}, a4:{w:210,h:297,fmt:'a4'} };
     const pg=pages[pageId]||pages.letter;
-    const margin=8, mark=3.2, gap=0;
+    const margin=8, gap=0;
+    const duplex=this.state.duplexBacks;
     this.toast('Building PDF…');
-    await this.ensureImages(this.state.cards);
+    const imgCards=[...this.state.cards];
+    if(duplex && this.state.back) imgCards.push(this.state.back);
+    await this.ensureImages(imgCards);
     const list=[];
     this.state.cards.forEach(c=>{ for(let q=0;q<(c.qty||1);q++) list.push(c); });
     if(!list.length){ this.toast('No cards'); return; }
     const pdf=new jsPDF({ unit:'mm', format:pg.fmt, orientation:'portrait' });
-    let placed=0, first=true;
-    let idx=0;
+    const backData={}; // rendered back PNG per distinct card size
+    const backFor=(card)=>{
+      const k=card.w+'x'+card.h;
+      if(!backData[k]) backData[k]=this.drawBackFor(card,ppm).toDataURL('image/png');
+      return backData[k];
+    };
+    let placed=0, first=true, idx=0;
     while(idx<list.length){
       if(!first) pdf.addPage(pg.fmt,'portrait');
       first=false;
       let x=margin, y=margin, rowH=0;
+      const slots=[];
       while(idx<list.length){
         const card=list[idx];
         const cw=card.w+2*B, ch=card.h+2*B;
         if(x+cw > pg.w-margin){ x=margin; y+=rowH+gap; rowH=0; }
         if(y+ch > pg.h-margin){ break; }
         const cv=this.drawCard(card,ppm);
-        const data=cv.toDataURL('image/png');
-        pdf.addImage(data,'PNG', x, y, cw, ch, undefined, 'FAST');
-        pdf.setDrawColor(40); pdf.setLineWidth(0.15);
-        const tx=x+B, ty=y+B, tr=x+B+card.w, tb=y+B+card.h;
-        const m=mark;
-        pdf.line(tx-m,ty, tx-0.5,ty); pdf.line(tx,ty-m, tx,ty-0.5);
-        pdf.line(tr+0.5,ty, tr+m,ty); pdf.line(tr,ty-m, tr,ty-0.5);
-        pdf.line(tx-m,tb, tx-0.5,tb); pdf.line(tx,tb+0.5, tx,tb+m);
-        pdf.line(tr+0.5,tb, tr+m,tb); pdf.line(tr,tb+0.5, tr,tb+m);
+        pdf.addImage(cv.toDataURL('image/png'),'PNG', x, y, cw, ch, undefined, 'FAST');
+        this.cutMarks(pdf, x, y, card);
+        slots.push({ x, y, card });
         x+=cw+gap; rowH=Math.max(rowH,ch); idx++; placed++;
+      }
+      if(duplex && slots.length){
+        pdf.addPage(pg.fmt,'portrait');
+        slots.forEach(sl=>{
+          const cw=sl.card.w+2*B, ch=sl.card.h+2*B;
+          const bx=pg.w - sl.x - cw; // x-mirror for long-edge flip
+          pdf.addImage(backFor(sl.card),'PNG', bx, sl.y, cw, ch, undefined, 'FAST');
+          this.cutMarks(pdf, bx, sl.y, sl.card);
+        });
       }
     }
     pdf.save('card-deck-'+pageId+'.pdf');
-    this.toast('PDF: '+placed+' cards exported');
+    this.toast('PDF: '+placed+' cards exported'+(duplex?' (double-sided)':''));
   }
 
   saveJSON(){
-    const data={ app:'card-maker', version:1, cards:this.state.cards, theme:this.state.theme, accent:this.state.accent, assets:this.state.assets };
+    const data={ app:'card-maker', version:2, cards:this.state.cards, back:this.state.back, theme:this.state.theme, accent:this.state.accent, assets:this.state.assets };
     this.download('card-project.json', new Blob([JSON.stringify(data)],{type:'application/json'}));
     this.toast('Project saved');
   }
@@ -637,7 +690,7 @@ class CardMaker extends React.Component {
       const d=JSON.parse(r.result);
       if(!d.cards) throw 0;
       this.history={past:[],future:[]}; this.imgCache={};
-      this.setState({ cards:d.cards, selCard:d.cards[0]&&d.cards[0].id, selEl:null, theme:d.theme||this.state.theme, accent:d.accent||this.state.accent, assets:Array.isArray(d.assets)?d.assets:[] });
+      this.setState({ cards:d.cards, back:d.back||null, side:'front', selCard:d.cards[0]&&d.cards[0].id, selEl:null, editEl:null, theme:d.theme||this.state.theme, accent:d.accent||this.state.accent, assets:Array.isArray(d.assets)?d.assets:[] });
       this.toast('Project loaded');
     }catch(e){ this.toast('Invalid project file'); } };
     r.readAsText(file);
@@ -732,8 +785,8 @@ class CardMaker extends React.Component {
     this.toast('Generated '+newCards.length+' cards');
   }
   openSeries(){
-    const c=this.curCard(); if(!c){ this.toast('Select a base card'); return; }
-    this.setState({ modal:'series', series:{ mode:'product', vars:[] } });
+    const c=this.frontCard(); if(!c){ this.toast('Select a base card'); return; }
+    this.setState({ modal:'series', side:'front', selEl:null, editEl:null, series:{ mode:'product', vars:[] } });
   }
   seriesTargets(){
     const c=this.curCard(); if(!c) return [];
@@ -1045,6 +1098,7 @@ class CardMaker extends React.Component {
     const t=this.th(), h=this.h, A=this.ac();
     const cards=this.state.cards;
     const total=cards.reduce((s,c)=>s+(c.qty||1),0);
+    const dim=this.isBack();
     const thumb=(card)=>{
       const on=card.id===this.state.selCard;
       const maxW=92, s=maxW/(card.w+2*this.B);
@@ -1077,14 +1131,18 @@ class CardMaker extends React.Component {
       h('div',{style:{padding:'14px 14px 10px',display:'flex',alignItems:'center',gap:8,borderBottom:'1px solid '+t.line}},
         h('div',{style:{fontSize:11,fontWeight:700,letterSpacing:'.9px',textTransform:'uppercase',color:t.sub,flex:1}},'Deck'),
         h('div',{style:{fontSize:11,color:t.faint,fontWeight:600}},cards.length+' cards · '+total+' printed'),
-        this.iconBtn('plus',()=>this.addCard(),{title:'Add card',w:30})),
-      h('div',{style:{flex:1,overflowY:'auto',padding:'10px 12px',display:'flex',flexDirection:'column',gap:8}},
+        h('div',{style:{opacity:dim?0.45:1,pointerEvents:dim?'none':'auto'}},
+          this.iconBtn('plus',()=>this.addCard(),{title:'Add card',w:30}))),
+      h('div',{style:{flex:1,overflowY:'auto',padding:'10px 12px',display:'flex',flexDirection:'column',gap:8,opacity:dim?0.45:1,pointerEvents:dim?'none':'auto'}},
         cards.map(thumb),
         h('div',{style:{display:'flex',gap:8,marginTop:2}},
           h('button',{onClick:()=>this.addCard(),style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px',borderRadius:9,border:'1.5px dashed '+t.border,background:'transparent',color:t.sub,cursor:'pointer',fontSize:12.5,fontWeight:600}},this.uIcon('plus',15,'currentColor'),'Add'),
           h('button',{onClick:()=>this.dupCard(),style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px',borderRadius:9,border:'1.5px dashed '+t.border,background:'transparent',color:t.sub,cursor:'pointer',fontSize:12.5,fontWeight:600}},this.uIcon('copy',15,'currentColor'),'Duplicate'))),
       h('div',{style:{borderTop:'1px solid '+t.border,padding:'13px 14px',display:'flex',flexDirection:'column',gap:8,background:t.panel2}},
         h('div',{style:{fontSize:11,fontWeight:700,letterSpacing:'.9px',textTransform:'uppercase',color:t.sub,marginBottom:2}},'Export & Project'),
+        h('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:12,fontWeight:600,color:t.text,cursor:'pointer',padding:'0 2px'}},
+          h('input',{type:'checkbox',checked:this.state.duplexBacks,onChange:e=>this.setState({duplexBacks:e.target.checked}),style:{accentColor:A}}),
+          'Double-sided (card backs)'),
         h('div',{style:{display:'flex',gap:8}},
           eBtn('download','PDF · Letter',()=>this.exportPDF('letter'),true),
           eBtn('download','PDF · A4',()=>this.exportPDF('a4'))),
@@ -1094,7 +1152,7 @@ class CardMaker extends React.Component {
         h('div',{style:{display:'flex',gap:8}},
           eBtn('grid','Generate series',()=>this.openSeries())),
         h('div',{style:{display:'flex',gap:8}},
-          eBtn('table','Batch fill',()=>this.setState({modal:'batch'})),
+          eBtn('table','Batch fill',()=>this.setState({modal:'batch', side:'front', selEl:null, editEl:null})),
           h('div',{style:{flex:1,display:'flex',gap:8}},
             this.iconBtn('save',()=>this.saveJSON(),{title:'Save project (JSON)',w:'100%'}),
             h('label',{title:'Load project',style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8,border:'1px solid '+t.border,background:t.panel,cursor:'pointer',color:t.text}},
@@ -1189,9 +1247,16 @@ class CardMaker extends React.Component {
         background:this.state[key]?t.panel:t.panel2,color:this.state[key]?t.text:t.faint,cursor:'pointer',fontSize:11.5,fontWeight:600}},
       h('span',{style:{width:9,height:9,borderRadius:2,border:'1.5px dashed '+col,display:'inline-block'}}),label);
     const zb=(icon,fn,title)=>h('button',{onClick:fn,title,style:{width:28,height:28,display:'flex',alignItems:'center',justifyContent:'center',border:'none',background:'transparent',color:t.sub,cursor:'pointer',fontSize:16,fontWeight:700}},icon);
+    const A=this.ac(), side=this.state.side;
+    const flipBtn=(v,label)=>h('button',{key:v,onClick:()=>{ if(side!==v) this.flipSide(); },
+      style:{padding:'4px 12px',borderRadius:6,border:'none',cursor:'pointer',fontSize:11.5,fontWeight:700,
+        background:side===v?A:'transparent',color:side===v?'#fff':t.sub,transition:'all .12s'}},label);
 
     return h('div',{style:{flex:1,minWidth:0,position:'relative',display:'flex',flexDirection:'column',background:t.canvas}},
       h('div',{style:{position:'absolute',top:14,left:'50%',transform:'translateX(-50%)',zIndex:4,display:'flex',gap:8,alignItems:'center',background:t.panel,border:'1px solid '+t.border,borderRadius:10,padding:'6px 8px',boxShadow:t.shadow}},
+        h('div',{style:{display:'flex',gap:2,background:t.panel2,border:'1px solid '+t.border,borderRadius:8,padding:2}},
+          flipBtn('front','Front'), flipBtn('back','Back')),
+        h('div',{style:{width:1,height:18,background:t.border}}),
         toggle('showBleed','Bleed','rgba(220,60,60,.8)'),
         toggle('showSafe','Safe','rgba(60,130,250,.8)'),
         h('div',{style:{width:1,height:18,background:t.border}}),
