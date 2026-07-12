@@ -752,8 +752,8 @@ class CardMaker extends React.Component {
     this.toast('Generated '+newCards.length+' cards');
   }
   openSeries(){
-    const c=this.curCard(); if(!c){ this.toast('Select a base card'); return; }
-    this.setState({ modal:'series', series:{ mode:'product', vars:[] } });
+    const c=this.frontCard(); if(!c){ this.toast('Select a base card'); return; }
+    this.setState({ modal:'series', side:'front', selEl:null, editEl:null, series:{ mode:'product', vars:[] } });
   }
   seriesTargets(){
     const c=this.curCard(); if(!c) return [];
@@ -1065,6 +1065,7 @@ class CardMaker extends React.Component {
     const t=this.th(), h=this.h, A=this.ac();
     const cards=this.state.cards;
     const total=cards.reduce((s,c)=>s+(c.qty||1),0);
+    const dim=this.isBack();
     const thumb=(card)=>{
       const on=card.id===this.state.selCard;
       const maxW=92, s=maxW/(card.w+2*this.B);
@@ -1097,8 +1098,9 @@ class CardMaker extends React.Component {
       h('div',{style:{padding:'14px 14px 10px',display:'flex',alignItems:'center',gap:8,borderBottom:'1px solid '+t.line}},
         h('div',{style:{fontSize:11,fontWeight:700,letterSpacing:'.9px',textTransform:'uppercase',color:t.sub,flex:1}},'Deck'),
         h('div',{style:{fontSize:11,color:t.faint,fontWeight:600}},cards.length+' cards · '+total+' printed'),
-        this.iconBtn('plus',()=>this.addCard(),{title:'Add card',w:30})),
-      h('div',{style:{flex:1,overflowY:'auto',padding:'10px 12px',display:'flex',flexDirection:'column',gap:8}},
+        h('div',{style:{opacity:dim?0.45:1,pointerEvents:dim?'none':'auto'}},
+          this.iconBtn('plus',()=>this.addCard(),{title:'Add card',w:30}))),
+      h('div',{style:{flex:1,overflowY:'auto',padding:'10px 12px',display:'flex',flexDirection:'column',gap:8,opacity:dim?0.45:1,pointerEvents:dim?'none':'auto'}},
         cards.map(thumb),
         h('div',{style:{display:'flex',gap:8,marginTop:2}},
           h('button',{onClick:()=>this.addCard(),style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px',borderRadius:9,border:'1.5px dashed '+t.border,background:'transparent',color:t.sub,cursor:'pointer',fontSize:12.5,fontWeight:600}},this.uIcon('plus',15,'currentColor'),'Add'),
@@ -1114,7 +1116,7 @@ class CardMaker extends React.Component {
         h('div',{style:{display:'flex',gap:8}},
           eBtn('grid','Generate series',()=>this.openSeries())),
         h('div',{style:{display:'flex',gap:8}},
-          eBtn('table','Batch fill',()=>this.setState({modal:'batch'})),
+          eBtn('table','Batch fill',()=>this.setState({modal:'batch', side:'front', selEl:null, editEl:null})),
           h('div',{style:{flex:1,display:'flex',gap:8}},
             this.iconBtn('save',()=>this.saveJSON(),{title:'Save project (JSON)',w:'100%'}),
             h('label',{title:'Load project',style:{flex:1,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8,border:'1px solid '+t.border,background:t.panel,cursor:'pointer',color:t.text}},
@@ -1209,9 +1211,16 @@ class CardMaker extends React.Component {
         background:this.state[key]?t.panel:t.panel2,color:this.state[key]?t.text:t.faint,cursor:'pointer',fontSize:11.5,fontWeight:600}},
       h('span',{style:{width:9,height:9,borderRadius:2,border:'1.5px dashed '+col,display:'inline-block'}}),label);
     const zb=(icon,fn,title)=>h('button',{onClick:fn,title,style:{width:28,height:28,display:'flex',alignItems:'center',justifyContent:'center',border:'none',background:'transparent',color:t.sub,cursor:'pointer',fontSize:16,fontWeight:700}},icon);
+    const A=this.ac(), side=this.state.side;
+    const flipBtn=(v,label)=>h('button',{key:v,onClick:()=>{ if(side!==v) this.flipSide(); },
+      style:{padding:'4px 12px',borderRadius:6,border:'none',cursor:'pointer',fontSize:11.5,fontWeight:700,
+        background:side===v?A:'transparent',color:side===v?'#fff':t.sub,transition:'all .12s'}},label);
 
     return h('div',{style:{flex:1,minWidth:0,position:'relative',display:'flex',flexDirection:'column',background:t.canvas}},
       h('div',{style:{position:'absolute',top:14,left:'50%',transform:'translateX(-50%)',zIndex:4,display:'flex',gap:8,alignItems:'center',background:t.panel,border:'1px solid '+t.border,borderRadius:10,padding:'6px 8px',boxShadow:t.shadow}},
+        h('div',{style:{display:'flex',gap:2,background:t.panel2,border:'1px solid '+t.border,borderRadius:8,padding:2}},
+          flipBtn('front','Front'), flipBtn('back','Back')),
+        h('div',{style:{width:1,height:18,background:t.border}}),
         toggle('showBleed','Bleed','rgba(220,60,60,.8)'),
         toggle('showSafe','Safe','rgba(60,130,250,.8)'),
         h('div',{style:{width:1,height:18,background:t.border}}),
