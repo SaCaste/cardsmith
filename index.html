@@ -497,6 +497,15 @@ class CardMaker extends React.Component {
     return { x: bx? +(px+bx.d).toFixed(2) : +px.toFixed(1),
              y: by? +(py+by.d).toFixed(2) : +py.toFixed(1), guides };
   }
+  faceMM(e){
+    const r=this.faceEl.getBoundingClientRect(), s=this.scale, B=this.B;
+    return { x:(e.clientX-r.left)/s-B, y:(e.clientY-r.top)/s-B };
+  }
+  onFaceDown(e){
+    if(e.button!==0) return;
+    const p=this.faceMM(e);
+    this.drag={ mode:'marquee', sx:e.clientX, sy:e.clientY, x0:p.x, y0:p.y, moved:false };
+  }
   onElPointerDown(e, el){
     if(e.button!==0) return;
     if(this.state.editEl===el.id) return;
@@ -563,8 +572,25 @@ class CardMaker extends React.Component {
       if(e.shiftKey) ang=Math.round(ang/15)*15;
       this.updateSelEl({ rotation:Math.round(ang) }, {hist:false});
     }
+    else if(d.mode==='marquee'){
+      if(Math.abs(e.clientX-d.sx)+Math.abs(e.clientY-d.sy)>3) d.moved=true;
+      const p=this.faceMM(e);
+      this.setState({ marquee:{ x0:d.x0, y0:d.y0, x1:p.x, y1:p.y } });
+    }
   }
-  onPointerUp(){ this.drag=null; if(this.state.guides.length) this.setState({guides:[]}); }
+  onPointerUp(){
+    const d=this.drag; this.drag=null;
+    if(d && d.mode==='marquee'){
+      const m=this.state.marquee;
+      if(!d.moved || !m){ this.setState({ selEl:null, selEls:[], editEl:null, marquee:null }); return; }
+      const x0=Math.min(m.x0,m.x1), x1=Math.max(m.x0,m.x1), y0=Math.min(m.y0,m.y1), y1=Math.max(m.y0,m.y1);
+      const c=this.curCard();
+      const ids=(c?c.elements:[]).filter(el=> el.x<x1 && el.x+el.w>x0 && el.y<y1 && el.y+el.h>y0).map(el=>el.id);
+      this.setSelection(ids, { marquee:null });
+      return;
+    }
+    if(this.state.guides.length) this.setState({guides:[]});
+  }
 
   ensureImages(cards){
     const srcs=new Set();
@@ -1334,9 +1360,14 @@ class CardMaker extends React.Component {
         const gb=this.selBBox();
         if(gb) children.push(h('div',{key:'gbb',style:{position:'absolute',left:(gb.x+B)*s,top:(gb.y+B)*s,width:gb.w*s,height:gb.h*s,outline:'1.5px dashed '+this.ac(),pointerEvents:'none',zIndex:4}}));
       }
+      if(this.state.marquee){
+        const m=this.state.marquee;
+        const mx=Math.min(m.x0,m.x1), my=Math.min(m.y0,m.y1), mw=Math.abs(m.x1-m.x0), mh=Math.abs(m.y1-m.y0);
+        children.push(h('div',{key:'mq',style:{position:'absolute',left:(mx+B)*s,top:(my+B)*s,width:mw*s,height:mh*s,border:'1px dashed '+this.ac(),background:this.ac()+'10',pointerEvents:'none',zIndex:6}}));
+      }
     }
     return h('div',{ref:interactive?(n=>this.faceEl=n):undefined,
-      onPointerDown:interactive?(e=>{ if(e.target===e.currentTarget) this.setState({selEl:null, selEls:[]}); }):undefined,
+      onPointerDown:interactive?(e=>{ if(e.target===e.currentTarget) this.onFaceDown(e); }):undefined,
       style:{position:'relative',width:pw,height:ph,background:bgStyle,borderRadius:interactive?2:1,overflow:'hidden',flex:'none'}},children);
   }
 
