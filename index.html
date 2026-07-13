@@ -134,6 +134,7 @@ class CardMaker extends React.Component {
   state = {
     theme:'studio', accent:'#10b981',
     cards:[], selCard:null, selEl:null, editEl:null,
+    selEls:[], marquee:null,
     side:'front', back:null, duplexBacks:false,
     showBleed:true, showSafe:true, zoom:1,
     snapOn:true, guides:[],
@@ -193,6 +194,19 @@ class CardMaker extends React.Component {
   frontCard(){ return this.state.cards.find(c=>c.id===this.state.selCard) || null; }
   curCard(){ return this.isBack() ? this.state.back : this.frontCard(); }
   curEl(){ const c=this.curCard(); if(!c) return null; return c.elements.find(e=>e.id===this.state.selEl) || null; }
+  // Normalize selection to the invariant: 0 ids -> none, 1 -> single selEl, 2+ -> multi selEls.
+  setSelection(ids, extra){
+    const u=[...new Set(ids)];
+    if(u.length>=2) this.setState({ selEls:u, selEl:null, editEl:null, ...(extra||{}) });
+    else this.setState({ selEls:[], selEl:u[0]||null, editEl:null, ...(extra||{}) });
+  }
+  selList(){ const c=this.curCard(); if(!c) return []; return c.elements.filter(e=>this.state.selEls.includes(e.id)); }
+  selBBox(){
+    const els=this.selList(); if(!els.length) return null;
+    const x0=Math.min(...els.map(e=>e.x)), y0=Math.min(...els.map(e=>e.y));
+    const x1=Math.max(...els.map(e=>e.x+e.w)), y1=Math.max(...els.map(e=>e.y+e.h));
+    return { x:x0, y:y0, w:x1-x0, h:y1-y0 };
+  }
   // Write the updated card object back to whichever side is on canvas.
   setCur(next, extra){
     if(this.isBack()) this.setState({ back:next, ...(extra||{}) });
@@ -209,7 +223,7 @@ class CardMaker extends React.Component {
   flipSide(){
     const side = this.isBack() ? 'front' : 'back';
     this._hk=null; // break undo coalescing across sides
-    const patch = { side, selEl:null, editEl:null };
+    const patch = { side, selEl:null, selEls:[], editEl:null, marquee:null };
     if(side==='back' && !this.state.back) patch.back=this.defaultBack(this.frontCard());
     this.setState(patch);
   }
@@ -241,7 +255,9 @@ class CardMaker extends React.Component {
     const side = (this.state.side==='back' && !this.state.back) ? 'front' : this.state.side;
     const cur = side==='back' ? this.state.back : c;
     if(!cur || !cur.elements.find(e=>e.id===selEl)) selEl=null;
-    this.setState({ selCard, selEl, side });
+    let selEls=this.state.selEls.filter(id=>cur && cur.elements.find(e=>e.id===id));
+    if(selEls.length===1){ selEl=selEls[0]; selEls=[]; }
+    this.setState({ selCard, selEl, selEls, side });
   }
 
   setCards(cards){ this.setState({ cards }); }
@@ -446,12 +462,13 @@ class CardMaker extends React.Component {
 
   // Snap target lines (mm, trim space) for the element being dragged.
   // Order matters for tie-breaks: card lines first, then elements in z-order.
-  buildSnapTargets(el){
+  buildSnapTargets(el, excludeIds){
     const c=this.curCard(); if(!c) return {v:[],h:[]};
+    const ex=excludeIds||[];
     const v=[0, c.w/2, c.w, this.SAFE, c.w-this.SAFE];
     const hz=[0, c.h/2, c.h, this.SAFE, c.h-this.SAFE];
     c.elements.forEach(o=>{
-      if(o.id===el.id) return;
+      if((el && o.id===el.id) || ex.includes(o.id)) return;
       if(o.rotation){ v.push(o.x+o.w/2); hz.push(o.y+o.h/2); return; } // rotated: center only
       v.push(o.x, o.x+o.w/2, o.x+o.w);
       hz.push(o.y, o.y+o.h/2, o.y+o.h);
@@ -484,7 +501,25 @@ class CardMaker extends React.Component {
     if(e.button!==0) return;
     if(this.state.editEl===el.id) return;
     e.stopPropagation();
-    this.setState({ selEl:el.id });
+    const S=this.state.selEls;
+    if(e.shiftKey){
+      // selection toggle only — never starts a drag (spec §3)
+      if(S.length) this.setSelection(S.includes(el.id) ? S.filter(i=>i!==el.id) : [...S, el.id]);
+      else if(this.state.selEl && this.state.selEl!==el.id) this.setSelection([this.state.selEl, el.id]);
+      else if(this.state.selEl===el.id) this.setSelection([]);
+      else this.setState({ selEl:el.id });
+      return;
+    }
+    if(S.includes(el.id)){
+      // drag the whole selection (move handler lands in a later task)
+      const members=this.selList().map(m=>({id:m.id, x:m.x, y:m.y}));
+      const bb=this.selBBox();
+      this.pushHistory('gmove');
+      this.drag={ mode:'gmove', sx:e.clientX, sy:e.clientY, members, bb,
+        targets:this.buildSnapTargets(null, S) };
+      return;
+    }
+    this.setState({ selEl:el.id, selEls:[] });
     this.pushHistory('move_'+el.id);
     this.drag={ mode:'move', sx:e.clientX, sy:e.clientY, ox:el.x, oy:el.y,
       box:{w:el.w, h:el.h, rotation:el.rotation||0}, targets:this.buildSnapTargets(el) };
@@ -737,7 +772,7 @@ class CardMaker extends React.Component {
       const d=JSON.parse(r.result);
       if(!d.cards) throw 0;
       this.history={past:[],future:[]}; this.imgCache={};
-      this.setState({ cards:d.cards, back:d.back||null, side:'front', selCard:d.cards[0]&&d.cards[0].id, selEl:null, editEl:null, theme:d.theme||this.state.theme, accent:d.accent||this.state.accent, assets:Array.isArray(d.assets)?d.assets:[] });
+      this.setState({ cards:d.cards, back:d.back||null, side:'front', selCard:d.cards[0]&&d.cards[0].id, selEl:null, selEls:[], marquee:null, editEl:null, theme:d.theme||this.state.theme, accent:d.accent||this.state.accent, assets:Array.isArray(d.assets)?d.assets:[] });
       this.toast('Project loaded');
     }catch(e){ this.toast('Invalid project file'); } };
     r.readAsText(file);
@@ -1220,7 +1255,7 @@ class CardMaker extends React.Component {
   }
 
   renderElDOM(el, s, interactive){
-    const h=this.h, B=this.B, sel=interactive && el.id===this.state.selEl, A=this.ac();
+    const h=this.h, B=this.B, sel=interactive && el.id===this.state.selEl, inSel=interactive && this.state.selEls.includes(el.id), A=this.ac();
     const wrap={ position:'absolute', left:(el.x+B)*s, top:(el.y+B)*s, width:el.w*s, height:el.h*s,
       transform:'rotate('+(el.rotation||0)+'deg)', transformOrigin:'center', opacity:el.opacity==null?1:el.opacity,
       cursor:interactive?(this.state.editEl===el.id?'text':'move'):'default' };
@@ -1255,9 +1290,9 @@ class CardMaker extends React.Component {
       }
     }
     const children=[inner];
-    if(sel){
+    if(sel || inSel){
       children.push(h('div',{key:'sel',style:{position:'absolute',inset:-1,border:'1.5px solid '+A,borderRadius:el.type==='shape'&&el.shape==='circle'?'50%':3,pointerEvents:'none'}}));
-      if(this.state.editEl!==el.id){
+      if(sel && this.state.editEl!==el.id){
         ['nw','ne','sw','se','n','s','e','w'].forEach(cn=>{
           const pos={nw:[0,0],n:[50,0],ne:[100,0],e:[100,50],se:[100,100],s:[50,100],sw:[0,100],w:[0,50]}[cn];
           const curs={nw:'nwse-resize',se:'nwse-resize',ne:'nesw-resize',sw:'nesw-resize',n:'ns-resize',s:'ns-resize',e:'ew-resize',w:'ew-resize'}[cn];
@@ -1295,9 +1330,13 @@ class CardMaker extends React.Component {
           ? {position:'absolute',left:(g.pos+B)*s-0.5,top:0,width:1,height:ph,background:'#ff4d94',pointerEvents:'none',zIndex:5}
           : {position:'absolute',top:(g.pos+B)*s-0.5,left:0,height:1,width:pw,background:'#ff4d94',pointerEvents:'none',zIndex:5}}));
       });
+      if(this.state.selEls.length>=2){
+        const gb=this.selBBox();
+        if(gb) children.push(h('div',{key:'gbb',style:{position:'absolute',left:(gb.x+B)*s,top:(gb.y+B)*s,width:gb.w*s,height:gb.h*s,outline:'1.5px dashed '+this.ac(),pointerEvents:'none',zIndex:4}}));
+      }
     }
     return h('div',{ref:interactive?(n=>this.faceEl=n):undefined,
-      onPointerDown:interactive?(e=>{ if(e.target===e.currentTarget) this.setState({selEl:null}); }):undefined,
+      onPointerDown:interactive?(e=>{ if(e.target===e.currentTarget) this.setState({selEl:null, selEls:[]}); }):undefined,
       style:{position:'relative',width:pw,height:ph,background:bgStyle,borderRadius:interactive?2:1,overflow:'hidden',flex:'none'}},children);
   }
 
