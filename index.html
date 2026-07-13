@@ -128,7 +128,9 @@ class CardMaker extends React.Component {
     alCR:'M20 3v18M6 8h10v8H6z',
     alCT:'M3 4h18M8 8h8v10H8z',
     alCM:'M3 12h18M8 6h8v12H8z',
-    alCB:'M3 20h18M8 6h8v10H8z'
+    alCB:'M3 20h18M8 6h8v10H8z',
+    distH:'M3 4v16M21 4v16M9 8h6v8H9z',
+    distV:'M4 3h16M4 21h16M8 9h8v6H8z'
   };
 
   state = {
@@ -178,11 +180,14 @@ class CardMaker extends React.Component {
     const tag = (e.target && e.target.tagName) || '';
     if(tag==='INPUT' || tag==='TEXTAREA') return;
     const mod = e.metaKey || e.ctrlKey;
+    const multi = this.state.selEls.length>=2;
     if(mod && e.key.toLowerCase()==='z'){ e.preventDefault(); if(e.shiftKey) this.redo(); else this.undo(); }
     else if(mod && e.key.toLowerCase()==='y'){ e.preventDefault(); this.redo(); }
-    else if(mod && e.key.toLowerCase()==='d'){ e.preventDefault(); this.dupEl(); }
+    else if(mod && e.key.toLowerCase()==='d'){ e.preventDefault(); if(multi) this.dupSels(); else this.dupEl(); }
+    else if(mod && e.key.toLowerCase()==='a'){ e.preventDefault(); const c=this.curCard(); if(c) this.setSelection(c.elements.map(x=>x.id)); }
     else if((e.key==='Enter'||e.key==='F2') && this.state.selEl && !this.state.editEl){ const el=this.curEl(); if(el && el.type==='text'){ e.preventDefault(); this.enterEdit(el); } }
-    else if((e.key==='Delete'||e.key==='Backspace') && this.state.selEl){ e.preventDefault(); this.deleteEl(); }
+    else if((e.key==='Delete'||e.key==='Backspace') && (this.state.selEl||multi)){ e.preventDefault(); if(multi) this.deleteSels(); else this.deleteEl(); }
+    else if(e.key==='Escape' && !this.state.editEl && (this.state.selEl||this.state.selEls.length)){ this.setState({ selEl:null, selEls:[] }); }
   }
 
   th(){ return this.THEMES[this.state.theme]; }
@@ -305,6 +310,49 @@ class CardMaker extends React.Component {
     const idx=c.elements.findIndex(e=>e.id===el.id);
     const els=[...c.elements]; els.splice(idx+1,0,ne);
     this.setCur({...c, elements:els}, { selEl:ne.id });
+  }
+  deleteSels(){
+    const c=this.curCard(); if(!c || this.state.selEls.length<2) return;
+    this.pushHistory('gdel');
+    const S=this.state.selEls;
+    this.setCur({ ...c, elements:c.elements.filter(e=>!S.includes(e.id)) }, { selEls:[], selEl:null });
+  }
+  dupSels(){
+    const c=this.curCard(); if(!c || this.state.selEls.length<2) return;
+    this.pushHistory('gdup');
+    const S=this.state.selEls;
+    const clones=c.elements.filter(e=>S.includes(e.id)).map(e=>({ ...this.clone(e), id:this.uid(), x:+(e.x+4).toFixed(1), y:+(e.y+4).toFixed(1) }));
+    this.setCur({ ...c, elements:[...c.elements, ...clones] }, { selEls:clones.map(e=>e.id), selEl:null });
+  }
+  alignSels(edge){
+    const c=this.curCard(); const bb=this.selBBox(); if(!c || !bb || this.state.selEls.length<2) return;
+    this.pushHistory('galign');
+    const S=this.state.selEls;
+    this.setCur({ ...c, elements:c.elements.map(e=>{
+      if(!S.includes(e.id)) return e;
+      if(edge==='l')  return {...e, x:+bb.x.toFixed(1)};
+      if(edge==='ch') return {...e, x:+(bb.x+(bb.w-e.w)/2).toFixed(1)};
+      if(edge==='r')  return {...e, x:+(bb.x+bb.w-e.w).toFixed(1)};
+      if(edge==='t')  return {...e, y:+bb.y.toFixed(1)};
+      if(edge==='cm') return {...e, y:+(bb.y+(bb.h-e.h)/2).toFixed(1)};
+      return {...e, y:+(bb.y+bb.h-e.h).toFixed(1)}; // 'b'
+    }) });
+  }
+  distributeSels(axis){
+    const c=this.curCard(); if(!c || this.state.selEls.length<3) return;
+    this.pushHistory('gdist');
+    const S=this.state.selEls;
+    const mem=c.elements.filter(e=>S.includes(e.id));
+    const p=axis==='h'?'x':'y', dim=axis==='h'?'w':'h';
+    const sorted=[...mem].sort((a,b)=>a[p]-b[p]);
+    const first=sorted[0], last=sorted[sorted.length-1];
+    const span=(last[p]+last[dim])-first[p];
+    const total=sorted.reduce((sum,e)=>sum+e[dim],0);
+    const gap=(span-total)/(sorted.length-1);
+    const pos={}; let cur=first[p];
+    sorted.forEach(e=>{ pos[e.id]=+cur.toFixed(1); cur+=e[dim]+gap; });
+    pos[last.id]=+last[p].toFixed(1); // outer two stay fixed exactly (no rounding drift)
+    this.setCur({ ...c, elements:c.elements.map(e=> S.includes(e.id) ? {...e, [p]:pos[e.id]} : e) });
   }
   layer(dir){
     const c=this.curCard(); const el=this.curEl(); if(!c||!el) return;
@@ -1079,8 +1127,31 @@ class CardMaker extends React.Component {
         this.uIcon('download',16,'#fff'),'Export PDF'));
   }
 
+  renderMultiPanel(){
+    const t=this.th(), h=this.h, n=this.state.selEls.length;
+    const rows=[];
+    rows.push(this.field('Align selection', h('div',{key:'galg',style:{display:'flex',gap:6}},
+      this.iconBtn('alCL',()=>this.alignSels('l'),{title:'Align lefts'}),
+      this.iconBtn('alCH',()=>this.alignSels('ch'),{title:'Align centers (H)'}),
+      this.iconBtn('alCR',()=>this.alignSels('r'),{title:'Align rights'}),
+      h('div',{style:{width:1,background:t.line}}),
+      this.iconBtn('alCT',()=>this.alignSels('t'),{title:'Align tops'}),
+      this.iconBtn('alCM',()=>this.alignSels('cm'),{title:'Align middles (V)'}),
+      this.iconBtn('alCB',()=>this.alignSels('b'),{title:'Align bottoms'}))));
+    rows.push(this.field('Distribute', h('div',{key:'gdst',style:{display:'flex',gap:6,opacity:n>=3?1:0.4,pointerEvents:n>=3?'auto':'none'}},
+      this.iconBtn('distH',()=>this.distributeSels('h'),{title:'Distribute horizontally'}),
+      this.iconBtn('distV',()=>this.distributeSels('v'),{title:'Distribute vertically'}))));
+    rows.push(h('div',{key:'gact',style:{display:'flex',gap:6,marginTop:4,paddingTop:12,borderTop:'1px solid '+t.line}},
+      this.iconBtn('copy',()=>this.dupSels(),{title:'Duplicate selection (⌘D)'}),
+      h('div',{style:{flex:1}}),
+      this.iconBtn(this.uIcon('trash',16,'#d4584a'),()=>this.deleteSels(),{title:'Delete selection'})));
+    return this.section('Inspector · '+n+' selected', 'layers',
+      h('div',{style:{background:t.panel2,border:'1px solid '+t.border,borderRadius:10,padding:'12px 12px 4px'}},rows));
+  }
   renderInspector(){
-    const t=this.th(), h=this.h, el=this.curEl();
+    const t=this.th(), h=this.h;
+    if(this.state.selEls.length>=2) return this.renderMultiPanel();
+    const el=this.curEl();
     if(!el) return null;
     const upd=(p,k)=>this.updateSelEl(p,{key:k});
     const rows=[];
