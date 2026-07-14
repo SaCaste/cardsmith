@@ -1,25 +1,52 @@
-# CODING AGENTS: READ THIS FIRST
+# CardSmith
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+**A free, browser-based card maker for prototyping board & card games.**
+Design cards at true print proportions, drop in art, text and icons, and export
+print-ready PDF cut sheets, PNGs and project files — no signup, no install,
+everything stays in your browser.
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+🔗 **Live app:** https://sacaste.github.io/cardsmith/
 
-## What you should do — IMPORTANT
+![CardSmith editor](docs/screenshot.png)
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+## Features
 
-**Read `project/Card Maker.dc.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+- **True-to-print canvas** — Poker, Tarot, Mini/Token or a custom size, with bleed and safe-area guides.
+- **Free element editing** — text, images, icons and shapes; move, resize, rotate, layer, and set opacity, with undo/redo.
+- **Multi-select** — shift-click or marquee to select many elements, then move the group, align, distribute, duplicate or delete them together.
+- **Snapping & alignment guides** — smart guides while dragging (hold <kbd>Alt</kbd> to bypass), plus align-to-card buttons.
+- **Templates & icons** — 8 starting card templates and a built-in icon library.
+- **Card backs & double-sided export** — one shared back per deck with mirrored, print-ready duplex PDF pages.
+- **Batch tools** — a deck panel with per-card quantities, a Series Generator, and CSV batch fill.
+- **Export anywhere** — PDF cut sheets (Letter / A4), PNG (single card or all), and JSON save/load.
+- **Themes** — Studio, Warm and Dark.
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+## Getting started
 
-## About the design files
+CardSmith is a single static page — there is nothing to build or install.
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+**Just use it:** open the [live app](https://sacaste.github.io/cardsmith/).
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+**Run it locally:**
 
-## Bundle contents
+```bash
+git clone https://github.com/SaCaste/cardsmith.git
+cd cardsmith
+python -m http.server 8987   # or any static file server
+# then open http://localhost:8987/index.html
+```
 
-- `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `Design core features planning` project files (HTML prototypes, assets, components)
+You can also open `index.html` directly from disk — it works from `file://`.
+
+## How it works
+
+- **Single file:** the entire app lives in [`index.html`](index.html) as one React 18 class component (`React.createElement`), with no build step.
+- **Vendored dependencies:** React, ReactDOM and [jsPDF](https://github.com/parallax/jsPDF) are bundled in [`vendor/`](vendor/), so the app has no runtime JavaScript CDN dependency and works offline. (Web fonts are loaded from Google Fonts as a progressive enhancement and fall back to system fonts if unavailable.)
+- **Your data stays with you:** there is no backend and no account. Projects live in your browser and are only ever saved when you export a JSON / PDF / PNG file yourself.
+
+## Deploying your own copy
+
+Because it's static, any static host works. The simplest is **GitHub Pages**:
+Settings → Pages → *Deploy from a branch* → `main` / `root`. It will be served at
+`https://<user>.github.io/<repo>/`. Netlify, Vercel and Cloudflare Pages work the
+same way — point them at the repo (or drag the folder in), no build command needed.
